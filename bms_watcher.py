@@ -1,36 +1,14 @@
 #!/usr/bin/env python3
 """
-BookMyShow Theatre Watcher (Reusable)
-======================================
-Watches for a specific theatre + format to open booking on a given date.
+BookMyShow Watcher (Reusable)
+==============================
+Reads config.json for what to watch. No need to edit this file.
+
+Just edit config.json to add/remove movies, theatres, dates.
 
 Usage:
-    # Using full URL:
-    python bms_watcher.py --url "https://in.bookmyshow.com/buytickets/the-odyssey-chennai/movie-chen-ET00480917-MT/20260720" \
-                          --theatre LUXE --format IMAX
-
-    # Using movie name + date (constructs URL automatically):
-    python bms_watcher.py --movie "the-odyssey-chennai/movie-chen-ET00480917-MT" \
-                          --date 20260720 --theatre LUXE --format IMAX
-
-    # Watch any format (not just IMAX):
-    python bms_watcher.py --url "..." --theatre LUXE --format any
-
-    # Dry run:
-    python bms_watcher.py --url "..." --theatre LUXE --format IMAX --dry-run
-
-    # Custom ntfy topic:
-    python bms_watcher.py --url "..." --theatre LUXE --format IMAX --ntfy-topic my-alerts
-
-Options:
-    --url         Full BMS showtime URL
-    --movie       Movie path from BMS URL (alternative to --url)
-    --date        Date in YYYYMMDD format (used with --movie)
-    --theatre     Theatre name to watch for (e.g., LUXE, PVR, Palazzo)
-    --format      Format to filter (e.g., IMAX, 4DX, Dolby, or "any" for all)
-    --ntfy-topic  ntfy.sh topic name (default: bms-luxe-srihari)
-    --interval    How often cron runs, just for the notification message (default: 10)
-    --dry-run     Check but don't alert or write state
+    python bms_watcher.py            # run all watches from config.json
+    python bms_watcher.py --dry-run  # check without alerting
 """
 
 import argparse
@@ -44,28 +22,43 @@ from pathlib import Path
 from playwright.sync_api import sync_playwright
 
 SCRIPT_DIR = Path(__file__).parent
+CONFIG_FILE = SCRIPT_DIR / "config.json"
+
+
+# ─── Load config ──────────────────────────────────────────────────────────────
+
+def load_config() -> dict:
+    """Load config.json."""
+    if not CONFIG_FILE.exists():
+        print(f"ERROR: {CONFIG_FILE} not found. Create it first.")
+        sys.exit(1)
+    with open(CONFIG_FILE, "r", encoding="utf-8") as f:
+        return json.load(f)
 
 
 # ─── Notifications ────────────────────────────────────────────────────────────
 
-def notify(showtimes: list[str], theatre: str, fmt: str, url: str, ntfy_topic: str) -> None:
-    """Send 3 back-to-back urgent notifications."""
+def notify_found(theatre: str, showtimes: list[str], formats: list[str], url: str, ntfy_topic: str, watch_name: str) -> None:
+    """Send 3 back-to-back urgent notifications when a theatre opens."""
     import urllib.request
+
+    format_text = ", ".join(set(formats)) if formats else "Check BMS"
+    showtime_text = ", ".join(showtimes) if showtimes else "Available now"
 
     messages = [
         {
-            "title": f"BOOK NOW - {fmt} Opened!",
-            "msg": f"{theatre} - {fmt} booking is LIVE!\nShowtimes: {', '.join(showtimes)}",
+            "title": f"BOOK NOW - {theatre} is OPEN!",
+            "msg": f"[{watch_name}]\n{theatre} just opened booking!\nFormats: {format_text}\nShowtimes: {showtime_text}",
             "tags": "rotating_light",
         },
         {
-            "title": f"HURRY - {fmt} slots live!",
-            "msg": f"Go go go! {theatre} {fmt} is bookable now.\n{url}",
+            "title": f"HURRY - {theatre} slots live!",
+            "msg": f"Go go go! Book now:\n{url}",
             "tags": "fire",
         },
         {
-            "title": f"LAST REMINDER - Book {fmt} now!",
-            "msg": f"Showtimes: {', '.join(showtimes)}\nDon't miss it!\n{url}",
+            "title": f"LAST REMINDER - Book now!",
+            "msg": f"{theatre}\nShowtimes: {showtime_text}\nDon't miss it!\n{url}",
             "tags": "ticket",
         },
     ]
@@ -84,18 +77,19 @@ def notify(showtimes: list[str], theatre: str, fmt: str, url: str, ntfy_topic: s
         if i < len(messages) - 1:
             time.sleep(2)
 
-    print(f"[{datetime.now().isoformat()}] 3 urgent notifications sent!")
+    print(f"[{datetime.now().isoformat()}] 3 urgent notifications sent for {theatre}!")
 
 
-def notify_not_yet(theatre: str, fmt: str, ntfy_topic: str, interval: int) -> None:
+def notify_not_yet(theatres_waiting: list[str], ntfy_topic: str, interval: int, watch_name: str) -> None:
     """Send a 'no luck' notification."""
     import urllib.request
 
+    waiting = ", ".join(theatres_waiting)
     req = urllib.request.Request(
         f"https://ntfy.sh/{ntfy_topic}",
-        data=f"No luck yet. Still checking every {interval} min...".encode("utf-8"),
+        data=f"[{watch_name}] No luck yet. Waiting for: {waiting}. Checking every {interval} min...".encode("utf-8"),
         headers={
-            "Title": f"No luck - {theatre} {fmt} not open yet",
+            "Title": f"No luck - {watch_name}",
             "Priority": "high",
             "Tags": "hourglass",
         },
@@ -104,15 +98,10 @@ def notify_not_yet(theatre: str, fmt: str, ntfy_topic: str, interval: int) -> No
     print(f"[{datetime.now().isoformat()}] 'No luck' notification sent")
 
 
-# ─── Core logic ───────────────────────────────────────────────────────────────
+# ─── Page loading ─────────────────────────────────────────────────────────────
 
-def check(url: str, date_str: str, theatre: str, fmt: str) -> tuple[bool, list[str], str]:
-    """
-    Load the BMS page, find the theatre block, extract showtimes for the format.
-
-    Returns:
-        (found: bool, showtimes: list[str], raw_text: str)
-    """
+def load_page(url: str, date_str: str) -> str:
+    """Load the BMS page and return the rendered text."""
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=True)
         context = browser.new_context(
@@ -128,140 +117,159 @@ def check(url: str, date_str: str, theatre: str, fmt: str) -> tuple[bool, list[s
             page.goto(url, wait_until="domcontentloaded", timeout=90_000)
             page.wait_for_timeout(8000)
 
-            # Verify URL wasn't redirected to a different date
             current_url = page.url
-            if date_str not in current_url:
-                print(f"[{datetime.now().isoformat()}] Page redirected to: {current_url} (not {date_str})")
+            if date_str and date_str not in current_url:
+                print(f"[{datetime.now().isoformat()}] Page redirected to: {current_url} (expected {date_str})")
                 browser.close()
-                return (False, [], "")
+                return ""
 
             page_text = page.inner_text("body")
         except Exception as e:
             print(f"[{datetime.now().isoformat()}] Page load error: {e}", file=sys.stderr)
             browser.close()
-            return (False, [], "")
+            return ""
 
         browser.close()
+    return page_text
 
-    # ─── Parse: find theatre block ────────────────────────────────────────
+
+# ─── Theatre parsing ──────────────────────────────────────────────────────────
+
+def find_theatre(page_text: str, keyword: str, format_filter: str) -> tuple[bool, list[str], list[str]]:
+    """Find a theatre block and extract showtimes."""
     lines = page_text.splitlines()
-    in_theatre_block = False
-    theatre_lines: list[str] = []
+    in_block = False
+    block_lines: list[str] = []
 
     for line in lines:
         stripped = line.strip()
         if not stripped:
             continue
-        if theatre.lower() in stripped.lower():
-            in_theatre_block = True
-            theatre_lines = []
+        if keyword.lower() in stripped.lower():
+            in_block = True
+            block_lines = []
             continue
-        if in_theatre_block and _looks_like_theatre_header(stripped, theatre):
+        if in_block and _looks_like_theatre_header(stripped, keyword):
             break
-        if in_theatre_block:
-            theatre_lines.append(stripped)
+        if in_block:
+            block_lines.append(stripped)
 
-    # ─── Parse: pair format labels with showtimes ─────────────────────────
-    matched_showtimes: list[str] = []
+    if not in_block:
+        return (False, [], [])
+
+    showtimes: list[str] = []
+    formats: list[str] = []
     current_format = ""
-    match_any = fmt.lower() == "any"
+    match_any = format_filter.lower() == "any"
 
-    for entry in theatre_lines:
+    for entry in block_lines:
         if _is_format_label(entry):
             current_format = entry
+            if current_format not in formats:
+                formats.append(current_format)
         elif _is_showtime(entry):
-            if match_any or fmt.lower() in current_format.lower():
-                matched_showtimes.append(entry)
+            if match_any or format_filter.lower() in current_format.lower():
+                showtimes.append(entry)
 
-    found = len(matched_showtimes) > 0
-    return (found, matched_showtimes, "\n".join(theatre_lines[:40]))
+    if not showtimes:
+        return (False, [], formats)
+
+    return (True, showtimes, formats)
 
 
-def _looks_like_theatre_header(line: str, current_theatre: str) -> bool:
-    """Heuristic: theatre names contain keywords like 'cinemas', 'screen', 'PVR', 'INOX'."""
-    markers = ["pvr", "inox", "cinemas", "cinepolis", "screen", "palazzo", "sathyam", "luxe", "rohini", "kamala"]
+def _looks_like_theatre_header(line: str, current_keyword: str) -> bool:
+    markers = ["pvr", "inox", "cinemas", "cinepolis", "screen", "palazzo", "sathyam",
+               "rakki", "rohini", "kamala", "ags", "vr chennai", "luxe", "escape"]
     low = line.lower()
-    return any(m in low for m in markers) and current_theatre.lower() not in low
+    return any(m in low for m in markers) and current_keyword.lower() not in low
 
 
 def _is_format_label(text: str) -> bool:
-    """Format labels contain language or format keywords."""
-    indicators = ["2d", "3d", "imax", "4dx", "dolby", "english", "tamil", "hindi", "telugu", "atmos"]
+    indicators = ["2d", "3d", "imax", "4dx", "dolby", "english", "tamil",
+                  "hindi", "telugu", "atmos", "epiq", "screenx"]
     low = text.lower()
     return any(i in low for i in indicators)
 
 
 def _is_showtime(text: str) -> bool:
-    """Showtimes look like '10:30 AM', '02:15 PM', etc."""
     return bool(re.match(r"\d{1,2}:\d{2}\s*(AM|PM|am|pm)", text.strip()))
 
 
 # ─── Entrypoint ───────────────────────────────────────────────────────────────
 
 def main() -> None:
-    parser = argparse.ArgumentParser(
-        description="BookMyShow Watcher - get notified when a theatre opens booking"
-    )
-    parser.add_argument("--url", help="Full BMS showtime URL")
-    parser.add_argument("--movie", help="Movie path from BMS URL (used with --date)")
-    parser.add_argument("--date", help="Date in YYYYMMDD format (e.g., 20260720)")
-    parser.add_argument("--theatre", required=True, help="Theatre name to watch (e.g., LUXE, PVR)")
-    parser.add_argument("--format", default="IMAX", help="Format to filter (IMAX, 4DX, Dolby, or 'any')")
-    parser.add_argument("--ntfy-topic", default="bms-luxe-srihari", help="ntfy.sh topic")
-    parser.add_argument("--interval", type=int, default=10, help="Check interval in minutes (for notification text)")
+    parser = argparse.ArgumentParser(description="BookMyShow Watcher - reads config.json")
     parser.add_argument("--dry-run", action="store_true", help="Check but don't alert or write state")
     args = parser.parse_args()
 
-    # Build URL
-    if args.url:
-        target_url = args.url
-    elif args.movie and args.date:
-        target_url = f"https://in.bookmyshow.com/buytickets/{args.movie}/{args.date}"
-    else:
-        parser.error("Provide either --url OR both --movie and --date")
+    config = load_config()
+    ntfy_topic = config.get("ntfy_topic", "bms-luxe-srihari")
+    interval = config.get("interval", 10)
+    watches = config.get("watches", [])
 
-    # Extract date from URL for redirect checking
-    date_match = re.search(r"(\d{8})$", target_url.rstrip("/"))
-    date_str = date_match.group(1) if date_match else ""
-
-    # State file unique per theatre+date combo
-    state_file = SCRIPT_DIR / f".bms_alert_{args.theatre.lower()}_{date_str}"
-
-    # Already alerted?
-    if state_file.exists() and not args.dry_run:
-        print(f"[{datetime.now().isoformat()}] Already alerted (state file exists). Exiting.")
+    if not watches:
+        print("No watches in config.json. Add some and re-run.")
         sys.exit(0)
 
-    print(f"[{datetime.now().isoformat()}] Checking BMS for {args.theatre} {args.format} showtimes...")
-    print(f"  URL: {target_url}")
+    for watch in watches:
+        watch_name = watch.get("name", "Unknown")
+        url = watch["url"]
+        theatres = watch["theatres"]
+        format_filter = watch.get("format", "any")
 
-    found, showtimes, debug_text = check(target_url, date_str, args.theatre, args.format)
+        # Extract date from URL
+        date_match = re.search(r"(\d{8})", url)
+        date_str = date_match.group(1) if date_match else ""
 
-    if found:
-        print(f"[{datetime.now().isoformat()}] ✅ ✅ ✅ {args.format} showtimes found: {showtimes}")
-        if args.dry_run:
-            print("[dry-run] Would alert and write state file.")
-        else:
-            notify(showtimes, args.theatre, args.format, target_url, args.ntfy_topic)
-            state_file.write_text(
-                json.dumps({
-                    "alerted_at": datetime.now().isoformat(),
-                    "showtimes": showtimes,
-                    "theatre": args.theatre,
-                    "format": args.format,
-                }),
-                encoding="utf-8",
-            )
-            print(f"[{datetime.now().isoformat()}] State file written. Won't alert again.")
-    else:
-        print(f"[{datetime.now().isoformat()}] ❌ ❌ ❌ No {args.format} showtimes yet for {args.theatre}.")
-        if not args.dry_run:
-            notify_not_yet(args.theatre, args.format, args.ntfy_topic, args.interval)
-        if debug_text:
-            print("── Theatre block (first 40 lines) ──")
-            print(debug_text)
-        else:
-            print("(Theatre block not found on page at all.)")
+        # Check which theatres still need alerting
+        theatres_to_check = []
+        for theatre in theatres:
+            state_file = SCRIPT_DIR / f".bms_alert_{theatre.lower().replace(' ', '_')}_{date_str}"
+            if not state_file.exists() or args.dry_run:
+                theatres_to_check.append(theatre)
+
+        if not theatres_to_check:
+            print(f"[{datetime.now().isoformat()}] [{watch_name}] All theatres already alerted. Skipping.")
+            continue
+
+        print(f"[{datetime.now().isoformat()}] [{watch_name}] Checking...")
+        print(f"  Theatres: {theatres_to_check} | Format: {format_filter}")
+
+        page_text = load_page(url, date_str)
+        if not page_text:
+            print(f"  Failed to load page. Will retry next run.")
+            continue
+
+        found_any = False
+        theatres_waiting = []
+
+        for theatre in theatres_to_check:
+            found, showtimes, formats = find_theatre(page_text, theatre, format_filter)
+            state_file = SCRIPT_DIR / f".bms_alert_{theatre.lower().replace(' ', '_')}_{date_str}"
+
+            if found:
+                found_any = True
+                print(f"  ✅ ✅ ✅ {theatre} is listed! Formats: {formats} Showtimes: {showtimes}")
+                if args.dry_run:
+                    print(f"    [dry-run] Would alert for {theatre}")
+                else:
+                    notify_found(theatre, showtimes, formats, url, ntfy_topic, watch_name)
+                    state_file.write_text(
+                        json.dumps({
+                            "alerted_at": datetime.now().isoformat(),
+                            "theatre": theatre,
+                            "showtimes": showtimes,
+                            "formats": formats,
+                        }),
+                        encoding="utf-8",
+                    )
+                    print(f"    State file written for {theatre}.")
+            else:
+                theatres_waiting.append(theatre)
+                print(f"  ❌ {theatre} not listed yet.")
+
+        if not found_any and not args.dry_run:
+            notify_not_yet(theatres_waiting, ntfy_topic, interval, watch_name)
 
 
 if __name__ == "__main__":

@@ -5,3 +5,4 @@ __pycache__/
 cron.log
 spiderman_cron.log
 spiderman_launchd.log
+.vscode/

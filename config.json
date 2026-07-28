@@ -1,0 +1,12 @@
+{
+    "ntfy_topic": "bms-luxe-srihari",
+    "interval": 10,
+    "watches": [
+        {
+            "name": "Spider-Man Jul 30",
+            "url": "https://in.bookmyshow.com/movies/chennai/spider-man-brand-new-day/buytickets/ET00502600/20260730",
+            "theatres": ["VR Chennai", "Sathyam"],
+            "format": "any"
+        }
+    ]
+}
