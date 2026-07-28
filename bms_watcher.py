@@ -47,17 +47,17 @@ def notify_found(theatre: str, showtimes: list[str], formats: list[str], url: st
 
     messages = [
         {
-            "title": f"BOOK NOW - {theatre} is OPEN!",
-            "msg": f"[{watch_name}]\n{theatre} just opened booking!\nFormats: {format_text}\nShowtimes: {showtime_text}",
+            "title": f"BOOK NOW - {watch_name}!",
+            "msg": f"{theatre} just opened booking for {watch_name}!\nFormats: {format_text}\nShowtimes: {showtime_text}",
             "tags": "rotating_light",
         },
         {
             "title": f"HURRY - {theatre} slots live!",
-            "msg": f"Go go go! Book now:\n{url}",
+            "msg": f"{watch_name} at {theatre} - Go go go!\nBook now:\n{url}",
             "tags": "fire",
         },
         {
-            "title": f"LAST REMINDER - Book now!",
+            "title": f"LAST REMINDER - {watch_name}!",
             "msg": f"{theatre}\nShowtimes: {showtime_text}\nDon't miss it!\n{url}",
             "tags": "ticket",
         },
@@ -87,9 +87,9 @@ def notify_not_yet(theatres_waiting: list[str], ntfy_topic: str, interval: int, 
     waiting = ", ".join(theatres_waiting)
     req = urllib.request.Request(
         f"https://ntfy.sh/{ntfy_topic}",
-        data=f"[{watch_name}] No luck yet. Waiting for: {waiting}. Checking every {interval} min...".encode("utf-8"),
+        data=f"[{watch_name}] No luck yet.\nWaiting for: {waiting}\nChecking every {interval} min...".encode("utf-8"),
         headers={
-            "Title": f"No luck - {watch_name}",
+            "Title": f"No luck - {watch_name} | {waiting}",
             "Priority": "high",
             "Tags": "hourglass",
         },
