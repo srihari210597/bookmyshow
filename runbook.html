@@ -1,0 +1,160 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>BookMyShow IMAX Watcher — Runbook</title>
+<style>
+  :root { --bg: #1a1a2e; --card: #16213e; --accent: #e94560; --text: #eaeaea; --muted: #a0a0b0; --code-bg: #0f3460; }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: var(--bg); color: var(--text); line-height: 1.6; padding: 2rem; max-width: 860px; margin: auto; }
+  h1 { color: var(--accent); margin-bottom: 0.25rem; }
+  .subtitle { color: var(--muted); margin-bottom: 2rem; font-size: 0.95rem; }
+  h2 { color: var(--accent); margin: 2rem 0 0.75rem; border-bottom: 1px solid #333; padding-bottom: 0.25rem; }
+  .step { background: var(--card); border-left: 4px solid var(--accent); border-radius: 6px; padding: 1rem 1.25rem; margin-bottom: 1rem; }
+  .step-num { font-weight: 700; color: var(--accent); margin-bottom: 0.25rem; }
+  code, pre { background: var(--code-bg); border-radius: 4px; font-family: 'SF Mono', 'Fira Code', monospace; font-size: 0.88rem; }
+  code { padding: 2px 6px; }
+  pre { padding: 0.75rem 1rem; overflow-x: auto; margin: 0.5rem 0; white-space: pre-wrap; }
+  table { width: 100%; border-collapse: collapse; margin: 1rem 0; }
+  th, td { text-align: left; padding: 0.5rem 0.75rem; border: 1px solid #333; }
+  th { background: var(--code-bg); }
+  .warn { background: #2d1b00; border-left-color: #f5a623; }
+  a { color: #4fc3f7; }
+</style>
+</head>
+<body>
+
+<h1>🎬 BookMyShow IMAX Watcher</h1>
+<p class="subtitle">Runbook — INOX LUXE Velachery · The Odyssey · Mon 20 Jul 2026 · IMAX</p>
+
+<h2>Prerequisites</h2>
+<div class="step">
+  <ul>
+    <li>macOS with Python 3.11+ (<code>python3 --version</code>)</li>
+    <li>Homebrew (for Chromium dependencies if needed)</li>
+    <li>Internet connection (obviously)</li>
+  </ul>
+</div>
+
+<h2>Setup (Steps 1–5)</h2>
+
+<div class="step">
+  <p class="step-num">Step 1 — Create a virtual environment</p>
+  <pre>cd ~/Desktop/"Book MY"
+python3 -m venv .venv
+source .venv/bin/activate</pre>
+</div>
+
+<div class="step">
+  <p class="step-num">Step 2 — Install dependencies</p>
+  <pre>pip install playwright
+playwright install chromium</pre>
+  <p style="color:var(--muted);margin-top:0.4rem;">If you pick ntfy.sh later, also: <code>pip install requests</code></p>
+</div>
+
+<div class="step">
+  <p class="step-num">Step 3 — Configure Gmail alert</p>
+  <p>Open <code>bms_theatre_watch.py</code> and fill in the three fields at the top of <code>notify()</code>:</p>
+  <pre>GMAIL_USER = "you@gmail.com"
+GMAIL_APP_PASSWORD = "xxxx xxxx xxxx xxxx"
+TO_EMAIL = "you@gmail.com"</pre>
+  <p style="margin-top:0.5rem;"><strong>To get an App Password:</strong></p>
+  <ol style="padding-left:1.25rem; color:var(--muted);">
+    <li>Go to <a href="https://myaccount.google.com/apppasswords">myaccount.google.com/apppasswords</a></li>
+    <li>Sign in, select app "Mail", device "Mac"</li>
+    <li>Copy the 16-character password into <code>GMAIL_APP_PASSWORD</code></li>
+  </ol>
+  <p style="margin-top:0.5rem; color:var(--muted);">2FA must be enabled on your Google account for App Passwords to appear.</p>
+</div>
+
+<div class="step">
+  <p class="step-num">Step 4 — Dry-run test</p>
+  <pre>python bms_theatre_watch.py --dry-run</pre>
+  <p>Expect: "No IMAX showtimes yet for LUXE" (since Monday isn't listed yet). Confirms Playwright + page load work.</p>
+</div>
+
+<div class="step">
+  <p class="step-num">Step 5 — Manual real-run test (optional)</p>
+  <p>Temporarily change <code>THEATRE_KEYWORD</code> to <code>"PVR"</code> (which already has Monday shows) and run without <code>--dry-run</code>. Verify your alert fires. Then revert to <code>"LUXE"</code> and delete <code>.bms_alert_sent</code>.</p>
+</div>
+
+<h2>Scheduling (Steps 6–8)</h2>
+
+<div class="step">
+  <p class="step-num">Step 6 — Install the cron job</p>
+  <pre>crontab -e</pre>
+  <p>Add this line (runs every 5 minutes):</p>
+  <pre>*/5 * * * * cd ~/Desktop/"Book MY" && .venv/bin/python bms_theatre_watch.py >> cron.log 2>&1</pre>
+</div>
+
+<div class="step">
+  <p class="step-num">Step 7 — Grant cron Full Disk Access</p>
+  <p>System Settings → Privacy & Security → Full Disk Access → add <code>/usr/sbin/cron</code>.</p>
+  <p style="color:var(--muted);">Without this, macOS may silently block network access from cron.</p>
+</div>
+
+<div class="step warn">
+  <p class="step-num">Step 8 — Prevent sleep (critical)</p>
+  <p><strong>cron does NOT run while your Mac sleeps and does NOT replay missed jobs on wake.</strong></p>
+  <p>Option A — keep awake overnight:</p>
+  <pre>caffeinate -s &</pre>
+  <p>Option B — use a cloud VM (even a free-tier EC2 or a $5 DigitalOcean droplet). Copy the project, install Playwright there, and add the same cron entry.</p>
+</div>
+
+<h2>After Booking (Steps 9–10)</h2>
+
+<div class="step">
+  <p class="step-num">Step 9 — Disable the watcher</p>
+  <pre># Remove cron entry
+crontab -e   # delete the line
+
+# Or just stop caffeinate
+killall caffeinate</pre>
+</div>
+
+<div class="step">
+  <p class="step-num">Step 10 — Reset if needed</p>
+  <p>To re-arm the watcher (e.g., if you want to watch a different date):</p>
+  <pre>rm .bms_alert_sent
+# Edit TARGET_URL and date in bms_theatre_watch.py
+# Re-add cron entry</pre>
+</div>
+
+<h2>Troubleshooting</h2>
+<table>
+  <tr><th>Symptom</th><th>Likely cause</th><th>Fix</th></tr>
+  <tr><td>Page load error / timeout</td><td>BMS rate-limiting or Chromium not installed</td><td>Run <code>playwright install chromium</code>; increase timeout; try again in 5 min</td></tr>
+  <tr><td>"LUXE block not found on page"</td><td>BMS changed their layout / venue name</td><td>Run with <code>--dry-run</code>, inspect raw output; update <code>THEATRE_KEYWORD</code></td></tr>
+  <tr><td>Alert never fires</td><td>Mac slept; cron missed window</td><td>Check <code>cron.log</code>; use <code>caffeinate</code> or a VM</td></tr>
+  <tr><td>Alerted for non-IMAX show</td><td>Format label mismatch</td><td>Run dry-run, check LUXE block output; adjust <code>_is_format_label()</code></td></tr>
+  <tr><td>State file exists but no alert received</td><td>notify() channel misconfigured</td><td>Delete <code>.bms_alert_sent</code>, fix channel config, re-run</td></tr>
+  <tr><td>Gmail "less secure app" error</td><td>Need App Password, not account password</td><td><a href="https://myaccount.google.com/apppasswords">Generate App Password</a></td></tr>
+  <tr><td>ntfy notification not appearing</td><td>Wrong topic name or app not subscribed</td><td>Verify topic in ntfy app matches <code>NTFY_TOPIC</code> in script</td></tr>
+</table>
+
+<h2>Architecture at a Glance</h2>
+<pre>
+┌──────────┐    every 5 min    ┌──────────────────────┐
+│  cron    │───────────────────▶│ bms_theatre_watch.py │
+└──────────┘                    └──────────┬───────────┘
+                                           │
+                          Playwright (headless Chromium)
+                                           │
+                                           ▼
+                               ┌───────────────────────┐
+                               │  BookMyShow showtime  │
+                               │  page (JS-rendered)   │
+                               └───────────┬───────────┘
+                                           │
+                              parse LUXE block + IMAX filter
+                                           │
+                               ┌───────────▼───────────┐
+                               │  Match found?         │
+                               │  YES → notify + state │
+                               │  NO  → exit silently  │
+                               └───────────────────────┘
+</pre>
+
+</body>
+</html>

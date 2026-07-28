@@ -1,0 +1,7 @@
+.venv/
+__pycache__/
+*.pyc
+.bms_alert_*
+cron.log
+spiderman_cron.log
+spiderman_launchd.log
