@@ -30,6 +30,10 @@ the app. To change it, edit `ntfy_topic`.
 
 ## Watching a new movie (the only routine step)
 
+> **Follow the full runbook in [NEXT_MOVIE.md](NEXT_MOVIE.md).** The steps below
+> are the summary; the runbook includes the mandatory verify step that prevents
+> the silent-miss we hit with Jailer 2. Do not skip the dry-run.
+
 You always watch in Chennai across your 5 standing theatres, so setting up a
 new movie takes one command:
 

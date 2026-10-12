@@ -5,6 +5,10 @@ preferred Chennai theatres open booking for a movie. Built to **never fail
 silently** — if it can't read a page, it tells you; it never mistakes "I'm
 blind" for "not open yet".
 
+> **Setting up a new movie? Follow [NEXT_MOVIE.md](NEXT_MOVIE.md).**
+> It is the required runbook — especially the mandatory dry-run verify step
+> that prevents the silent-miss that happened with Jailer 2.
+
 ## Why this exists (the lesson that shaped it)
 
 BookMyShow surfaces a movie in several places that update at **different times**:
