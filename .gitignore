@@ -6,3 +6,5 @@ cron.log
 spiderman_cron.log
 spiderman_launchd.log
 .vscode/
+.bms_heartbeat
+caffeinate.log

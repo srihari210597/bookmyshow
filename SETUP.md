@@ -1,233 +1,141 @@
-# BookMyShow Watcher — Setup Guide
+# BookMyShow Watcher — Setup & Operations (Chennai)
 
-Get notified the moment your favourite theatre opens booking on BookMyShow.
-
-Works on **macOS** and **Windows**. Pick your section below.
-
----
-
-## Prerequisites (Both Platforms)
-
-- Python 3.9 or higher
-- Internet connection
-- [ntfy app](https://ntfy.sh) on your phone (free, no account needed)
-  - [Android (Play Store)](https://play.google.com/store/apps/details?id=io.heckel.ntfy)
-  - [iOS (App Store)](https://apps.apple.com/app/ntfy/id1625396347)
+Get notified the moment your preferred Chennai theatres open booking. This
+watcher checks every place a ticket can appear and **never fails silently**.
 
 ---
 
-## macOS Setup
+## Prerequisites
 
-### Step 1 — Clone the repo
+- Python 3.9+
+- [ntfy app](https://ntfy.sh) on your phone (free, no account)
+  - [Android](https://play.google.com/store/apps/details?id=io.heckel.ntfy) · [iOS](https://apps.apple.com/app/ntfy/id1625396347)
 
-```bash
-cd ~/Desktop
-git clone https://github.com/srihari210597/bookmyshow.git
-cd bookmyshow
-```
+---
 
-### Step 2 — Create virtual environment and install dependencies
+## One-time install
 
 ```bash
+cd ~/Desktop/"Book MY"
 python3 -m venv .venv
 source .venv/bin/activate
 pip install playwright
 playwright install chromium
 ```
 
-### Step 3 — Subscribe to ntfy topic on your phone
+Subscribe to the ntfy topic in `config.json` (default `bms-luxe-srihari`) in
+the app. To change it, edit `ntfy_topic`.
 
-1. Open the ntfy app
-2. Tap **+** → subscribe to topic: `bms-luxe-srihari` (or pick your own name)
-3. If you pick a custom name, update it in `config.json`
+---
 
-### Step 4 — Configure your watches
+## Watching a new movie (the only routine step)
 
-Edit `config.json`:
-
-```json
-{
-    "ntfy_topic": "bms-luxe-srihari",
-    "interval": 10,
-    "watches": [
-        {
-            "name": "Spider-Man Jul 30",
-            "url": "https://in.bookmyshow.com/movies/chennai/spider-man-brand-new-day/buytickets/ET00502600/20260730",
-            "theatres": ["VR Chennai", "Sathyam"],
-            "format": "any"
-        }
-    ]
-}
-```
-
-**Fields:**
-
-| Field | What to put |
-|-------|-------------|
-| `name` | Any label for your reference |
-| `url` | BMS showtime URL for the movie + date |
-| `theatres` | List of theatre keywords to watch |
-| `format` | `"any"`, `"IMAX"`, `"4DX"`, `"Dolby"`, etc. |
-
-### Step 5 — Test it
+You always watch in Chennai across your 5 standing theatres, so setting up a
+new movie takes one command:
 
 ```bash
-python bms_watcher.py --dry-run
+python setup_movie.py \
+    --name "Movie Name" \
+    --slug movie-slug \
+    --event ET00XXXXXX \
+    --date YYYYMMDD \
+    --clear-state
 ```
 
-You should see output like:
+**Finding `--slug` and `--event`:** open the movie on bookmyshow.com in
+Chennai, pick the date, and read the URL:
+
 ```
-[2026-07-28] [Spider-Man Jul 30] Checking...
-  Theatres: ['VR Chennai', 'Sathyam'] | Format: any
-  ❌ VR Chennai not listed yet.
-  ❌ Sathyam not listed yet.
+https://in.bookmyshow.com/movies/chennai/<slug>/buytickets/<EVENT>/<date>
+                                    ^^^^^^              ^^^^^^^
 ```
 
-### Step 6 — Set up cron (auto-check every 10 minutes)
+Example (Jailer 2, Oct 15 2026):
+```bash
+python setup_movie.py --name "Jailer 2" --slug jailer-2 --event ET00521160 --date 20261015 --clear-state
+```
+
+`--clear-state` wipes old alert/heartbeat files so everything re-arms cleanly.
+
+Then verify:
+```bash
+python bms_watcher.py --dry-run    # full check, sends nothing
+python bms_watcher.py --status     # shows which theatres are armed/alerted
+```
+
+---
+
+## Running it automatically (cron, every 15 min)
 
 ```bash
 crontab -e
 ```
-
-Add this line:
-
+Add:
 ```
-*/10 * * * * cd ~/Desktop/bookmyshow && .venv/bin/python bms_watcher.py >> cron.log 2>&1
+*/15 * * * * cd /Users/srihari/Desktop/Book\ MY && .venv/bin/python bms_watcher.py >> cron.log 2>&1
 ```
-
-### Step 7 — Prevent Mac from sleeping (important!)
-
-Cron won't run while your Mac sleeps.
-
-**Option A — Keep awake (simplest):**
-```bash
-caffeinate -s &
-```
-
-**Option B — Keep lid open, screen locked:**
-Press `Ctrl+Cmd+Q` to lock. Cron runs fine with screen locked and lid open.
-
-### Step 8 — Grant cron permissions (if needed)
 
 If cron logs show "Operation not permitted":
+System Settings → Privacy & Security → Full Disk Access → add `/usr/sbin/cron`.
 
-1. System Settings → Privacy & Security → Full Disk Access
-2. Click + → press Cmd+Shift+G → type `/usr/sbin/cron` → Add
+---
 
-### Step 9 — Stop the watcher (after you've booked)
+## Keeping the Mac awake (required)
+
+Cron won't fire while the Mac sleeps. A LaunchAgent keeps `caffeinate` running
+and restarts it automatically (survives reboots):
+
+`~/Library/LaunchAgents/com.srihari.caffeinate.plist` runs `caffeinate -i -m`.
+
+Check it:
+```bash
+launchctl list | grep caffeinate          # 0 in the middle column = healthy
+pmset -g assertions | grep caffeinate      # should show it preventing sleep
+```
+
+Note: `caffeinate` keeps the *system* awake; the display may still sleep (fine).
+Closing the lid will still sleep the Mac unless on power + external display.
+
+---
+
+## The five notification types
+
+| You see | It means |
+|---------|----------|
+| **Book Now / Hurry / Hurry Hurry / Last Reminder** (4 urgent) | A theatre opened booking — go book |
+| **Chennai booking OPEN** | Movie opened somewhere in Chennai though your named theatres didn't match — check manually |
+| **WATCHER PROBLEM** | A page couldn't be read; the watcher is partially blind there (NOT confirmed closed). Check Mac/network |
+| **No luck** | Everything was readable, nothing open yet |
+| **Watcher alive** | Periodic heartbeat so you know it's running |
+
+You get the 4-notification burst **once per theatre** (a state file prevents
+repeats). Each of the 5 theatres fires its own burst when it opens.
+
+---
+
+## Config reference (`config.json`)
+
+| Field | Meaning |
+|-------|---------|
+| `ntfy_topic` | ntfy topic your phone is subscribed to |
+| `interval` | minutes between checks (display text; real cadence = cron) |
+| `city` | always `chennai` |
+| `heartbeat_hours` | max frequency of the "alive" ping; `0` disables |
+| `movie` | the current watch (built by `setup_movie.py`) |
+| `defaults.preferred_theatres` | your standing theatre list used to build new movies |
+
+To change your standing theatres, edit `defaults.preferred_theatres` (each has
+`name`, `slug`, `code`, `movie_page_keyword`) and re-run `setup_movie.py`.
+
+---
+
+## After you've booked
 
 ```bash
-crontab -r          # removes cron job
-killall caffeinate  # let Mac sleep again
+crontab -r                                                            # stop checks
+launchctl unload ~/Library/LaunchAgents/com.srihari.caffeinate.plist  # allow sleep
+rm .bms_alert_* .bms_heartbeat                                        # clear state
 ```
-
-### Step 10 — Re-arm for next movie
-
-```bash
-rm .bms_alert_*     # delete state files
-# Edit config.json with new movie details
-# Re-add cron entry (Step 6)
-```
-
----
-
-## Windows Setup
-
-### Step 1 — Clone the repo
-
-```powershell
-cd ~\Desktop
-git clone https://github.com/srihari210597/bookmyshow.git
-cd bookmyshow
-```
-
-### Step 2 — Create virtual environment and install dependencies
-
-```powershell
-python -m venv .venv
-.venv\Scripts\activate
-pip install playwright
-playwright install chromium
-```
-
-### Step 3 — Subscribe to ntfy topic on your phone
-
-1. Open the ntfy app
-2. Tap **+** → subscribe to topic: `bms-luxe-srihari` (or pick your own name)
-3. If you pick a custom name, update it in `config.json`
-
-### Step 4 — Configure your watches
-
-Edit `config.json` (same format as macOS — see Step 4 above).
-
-### Step 5 — Test it
-
-```powershell
-python bms_watcher.py --dry-run
-```
-
-### Step 6 — Set up Task Scheduler (auto-check every 10 minutes)
-
-1. Open **Task Scheduler** (search in Start menu)
-2. Click **Create Basic Task**
-3. Name: `BMS Watcher`
-4. Trigger: **Daily**, start today, recur every 1 day
-5. Action: **Start a program**
-   - Program: `C:\Users\<YourName>\Desktop\bookmyshow\.venv\Scripts\python.exe`
-   - Arguments: `bms_watcher.py`
-   - Start in: `C:\Users\<YourName>\Desktop\bookmyshow`
-6. Click Finish
-
-Then edit the task for 10-minute repeats:
-1. Find your task in Task Scheduler Library
-2. Right-click → Properties → Triggers tab → Edit
-3. Check **Repeat task every:** `10 minutes` for a duration of `Indefinitely`
-4. OK → OK
-
-### Step 7 — Prevent sleep (important!)
-
-**Option A — Power settings:**
-1. Settings → System → Power & Sleep
-2. Set "Sleep" to **Never** (when plugged in)
-
-**Option B — Keep it plugged in and set to not sleep on lid close:**
-1. Control Panel → Power Options → Choose what closing the lid does
-2. Set "When I close the lid" to **Do nothing** (plugged in)
-
-### Step 8 — Stop the watcher (after you've booked)
-
-1. Open Task Scheduler → find `BMS Watcher` → right-click → Delete
-
-### Step 9 — Re-arm for next movie
-
-```powershell
-del .bms_alert_*
-# Edit config.json with new movie details
-# Re-create the Task Scheduler entry
-```
-
----
-
-## How to Find the BMS URL
-
-1. Go to [bookmyshow.com](https://in.bookmyshow.com)
-2. Search for your movie → select your city
-3. Click "Book tickets" → select the **date** you want
-4. Copy the URL from your browser. It looks like:
-   ```
-   https://in.bookmyshow.com/movies/chennai/movie-name/buytickets/ETXXXXXXXX/YYYYMMDD
-   ```
-5. Paste it into config.json (remove any `?query=params` from the end)
-
----
-
-## How Notifications Work
-
-| Scenario | What you get |
-|----------|-------------|
-| Theatre opens | 3 urgent back-to-back notifications with showtimes + booking link |
-| Not open yet | 1 "No luck" notification every 10 minutes |
-| Already alerted | Nothing (state file prevents re-alerting) |
 
 ---
 
@@ -235,22 +143,21 @@ del .bms_alert_*
 
 | Problem | Fix |
 |---------|-----|
-| "No module named playwright" | Run `pip install playwright` inside .venv |
-| Page timeout | Normal — BMS can be slow. Next run will retry |
-| Notifications not arriving | Check ntfy app is subscribed to the right topic |
-| False positive | BMS redirected to wrong date — already handled in code |
-| Watcher stops overnight | Mac slept or Windows went to sleep — fix power settings |
-| "Operation not permitted" (macOS) | Grant Full Disk Access to cron |
-| State file blocks alerts | Delete `.bms_alert_*` files to re-arm |
+| "No module named playwright" | `pip install playwright` inside `.venv` |
+| WATCHER PROBLEM notifications | A page kept failing — check network / that the Mac is awake. It auto-retries |
+| Page timeout in logs | BMS slow or date not open yet; next run retries |
+| No notifications at all | Confirm ntfy app subscribed to the right topic; run `--dry-run` to test |
+| "already alerted" / no re-alert | Delete `.bms_alert_*` or re-run `setup_movie.py --clear-state` |
+| Watcher stopped overnight | Mac slept — check the caffeinate LaunchAgent |
 
 ---
 
-## Project Files
+## Project files
 
 | File | Purpose |
 |------|---------|
-| `bms_watcher.py` | Main script (don't edit this) |
-| `config.json` | Your watches — edit this for new movies |
+| `bms_watcher.py` | The watcher (don't edit for routine use) |
+| `setup_movie.py` | Create a new movie watch from your defaults |
+| `config.json` | Current movie + your preferred theatres |
+| `README.md` | Overview + design |
 | `SETUP.md` | This guide |
-| `README.md` | Project overview |
-| `runbook.html` | Original HTML runbook |

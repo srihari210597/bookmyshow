@@ -1,42 +1,67 @@
-# BookMyShow Watcher
+# BookMyShow Watcher (Chennai)
 
-Automated alert system that watches BookMyShow and notifies you the moment a specific theatre opens booking for your chosen movie, date, and format.
+Automated alert system that watches BookMyShow and notifies you the moment your
+preferred Chennai theatres open booking for a movie. Built to **never fail
+silently** — if it can't read a page, it tells you; it never mistakes "I'm
+blind" for "not open yet".
+
+## Why this exists (the lesson that shaped it)
+
+BookMyShow surfaces a movie in several places that update at **different times**:
+
+- each theatre's own cinema page: `/cinemas/chennai/<slug>/buytickets/<CODE>/<date>`
+- the aggregated movie page: `/movies/chennai/<slug>/buytickets/<EVENT>/<date>`
+
+PVR and INOX usually open booking on their **own cinema page first**, before
+they appear on the aggregated movie page. An earlier version watched only the
+movie page, so when booking opened on the cinema pages it kept reporting "not
+listed yet" — a silent miss. This version fixes that by watching **every source**.
 
 ## How It Works
 
 ```
-┌──────────┐   every N min   ┌──────────────────┐   Playwright   ┌─────────────┐
-│   cron   │────────────────▶│  bms_watcher.py  │──────────────▶│  BookMyShow  │
-└──────────┘                  └────────┬─────────┘                └─────────────┘
-                                       │
-                          Parse theatre block + format filter
-                                       │
-                              ┌─────────▼──────────┐
-                              │   Match found?     │
-                              │   YES → 3x urgent  │──▶ ntfy.sh ──▶ Phone
-                              │   NO  → "No luck"  │──▶ ntfy.sh ──▶ Phone
-                              └────────────────────┘
+┌──────────┐  every N min  ┌──────────────────┐  Playwright  ┌──────────────────────┐
+│   cron   │──────────────▶│  bms_watcher.py  │─────────────▶│ BookMyShow            │
+└──────────┘                └────────┬─────────┘              │  • 5 cinema pages     │
+                                     │                        │  • 1 movie page       │
+            For EACH theatre: check its cinema page           └──────────────────────┘
+            AND the movie page. Plus a Chennai-wide net.
+                                     │
+                   ┌─────────────────▼──────────────────┐
+                   │  Open anywhere?  → 4x urgent        │──▶ ntfy ──▶ Phone
+                   │  Page unreadable? → WARNING         │──▶ ntfy ──▶ Phone
+                   │  All read, none open? → "No luck"   │──▶ ntfy ──▶ Phone
+                   │  Quiet day?       → heartbeat       │──▶ ntfy ──▶ Phone
+                   └─────────────────────────────────────┘
 ```
 
-1. **cron** triggers the script at a fixed interval (e.g., every 10 minutes)
-2. **Playwright** launches headless Chromium and loads the BMS showtimes page (JS-rendered, can't use plain HTTP)
-3. Script **parses** the rendered page text to find the target theatre block
-4. **Format filter** matches showtimes under the correct format label (IMAX, 4DX, Dolby, etc.)
-5. **Date verification** ensures BMS didn't redirect to a different date's page
-6. **ntfy.sh** sends push notifications to your phone — no login or API key needed
+## Four kinds of notification
+
+| Trigger | Notification | Priority |
+|---------|--------------|----------|
+| A theatre opens booking (on either source) | 4 back-to-back: **Book Now → Hurry → Hurry Hurry → Last Reminder** | urgent |
+| Movie opens somewhere in Chennai but none of your named theatres matched | **Chennai booking OPEN** safety net | urgent |
+| A page can't be read (timeout, redirect, empty) | **WATCHER PROBLEM** — lists the unreadable source(s) | high |
+| Everything readable, nothing open yet | **No luck** | default |
+| Quiet period (configurable) | **Watcher alive** heartbeat | min |
+
+The point: **silence is impossible**. Either a theatre opened, or the movie
+opened somewhere, or a page was unreadable (you're warned), or everything was
+read and nothing's open (you get "No luck"), or you get a periodic heartbeat.
 
 ## Files
 
 | File | Purpose |
 |------|---------|
-| `bms_watcher.py` | Reusable watcher — pass any movie/theatre/format/date as arguments |
-| `odyssey_watcher.py` | Original watcher hardcoded for The Odyssey / LUXE / IMAX / 20 Jul 2026 |
-| `runbook.html` | Step-by-step setup guide with troubleshooting |
-| `README.md` | This file |
+| `bms_watcher.py` | The watcher. Reads `config.json`. Don't edit for routine use. |
+| `setup_movie.py` | Build `config.json` for a new movie from your standing theatre list. |
+| `config.json` | Current movie + your 5 preferred Chennai theatres (defaults). |
+| `SETUP.md` | Install + operations guide. |
+| `README.md` | This file. |
 
 ## Quick Start
 
-### 1. Install dependencies
+### 1. Install (one time)
 
 ```bash
 cd ~/Desktop/"Book MY"
@@ -46,144 +71,120 @@ pip install playwright
 playwright install chromium
 ```
 
-### 2. Set up ntfy (notifications)
+### 2. Subscribe to notifications
 
-1. Install the **ntfy** app on your phone — [Android](https://play.google.com/store/apps/details?id=io.heckel.ntfy) / [iOS](https://apps.apple.com/app/ntfy/id1625396347)
-2. Subscribe to a topic (e.g., `bms-luxe-srihari`)
-3. Use the same topic name with `--ntfy-topic`
+Install the **ntfy** app and subscribe to the topic in `config.json`
+(default `bms-luxe-srihari`). [Android](https://play.google.com/store/apps/details?id=io.heckel.ntfy) · [iOS](https://apps.apple.com/app/ntfy/id1625396347)
 
-### 3. Run a test
+### 3. Point it at a movie
 
 ```bash
-python bms_watcher.py \
-    --url "https://in.bookmyshow.com/buytickets/the-odyssey-chennai/movie-chen-ET00480917-MT/20260720" \
-    --theatre LUXE \
-    --format IMAX \
-    --dry-run
+python setup_movie.py \
+    --name "Jailer 2" \
+    --slug jailer-2 \
+    --event ET00521160 \
+    --date 20261015 \
+    --clear-state
 ```
 
-### 4. Set up cron
+Get `--slug` and `--event` from the movie's BMS URL in Chennai:
+`https://in.bookmyshow.com/movies/chennai/<slug>/buytickets/<EVENT>/<date>`
+
+### 4. Test
+
+```bash
+python bms_watcher.py --dry-run   # checks everything, sends nothing
+python bms_watcher.py --status    # shows current state
+```
+
+### 5. Automate (every 15 min)
 
 ```bash
 crontab -e
 ```
-
-Add:
 ```
-*/10 * * * * /Users/srihari/Desktop/Book\ MY/.venv/bin/python /Users/srihari/Desktop/Book\ MY/bms_watcher.py --url "https://in.bookmyshow.com/buytickets/the-odyssey-chennai/movie-chen-ET00480917-MT/20260720" --theatre LUXE --format IMAX >> /Users/srihari/Desktop/Book\ MY/cron.log 2>&1
+*/15 * * * * cd /Users/srihari/Desktop/Book\ MY && .venv/bin/python bms_watcher.py >> cron.log 2>&1
 ```
 
-### 5. Prevent Mac from sleeping
+### 6. Keep the Mac awake
+
+A `caffeinate` LaunchAgent (`~/Library/LaunchAgents/com.srihari.caffeinate.plist`)
+keeps the system awake and restarts itself. Verify:
+```bash
+launchctl list | grep caffeinate
+pmset -g assertions | grep caffeinate
+```
+
+## Your preferred theatres (defaults)
+
+Stored in `config.json` under `defaults.preferred_theatres`. `setup_movie.py`
+builds every new movie's watch from this list — no manual URL assembly.
+
+| Theatre | Cinema code |
+|---------|-------------|
+| PVR: VR Chennai, Anna Nagar | `PCAN` |
+| PVR: Aerohub, Chennai | `PABC` |
+| INOX: LUXE Phoenix Market City, Velachery | `INPR` |
+| PVR: Palazzo, The Nexus Vijaya Mall | `PVPZ` |
+| PVR: Sathyam, Royapettah | `PVSR` |
+
+To add/remove a theatre, edit `defaults.preferred_theatres` (name, slug, code,
+movie_page_keyword), then re-run `setup_movie.py`.
+
+## config.json shape
+
+```json
+{
+    "ntfy_topic": "bms-luxe-srihari",
+    "interval": 15,
+    "city": "chennai",
+    "heartbeat_hours": 12,
+    "movie": {
+        "name": "Jailer 2",
+        "date": "20261015",
+        "movie_page_url": "https://in.bookmyshow.com/movies/chennai/jailer-2/buytickets/ET00521160/20261015",
+        "theatres": [
+            {
+                "name": "VR Chennai",
+                "cinema_url": "https://in.bookmyshow.com/cinemas/chennai/pvr-vr-chennai-anna-nagar/buytickets/PCAN/20261015",
+                "movie_page_keyword": "VR Chennai"
+            }
+        ]
+    },
+    "defaults": { "preferred_theatres": [ ] }
+}
+```
+
+- `interval` — minutes between checks (text only; actual cadence is your cron).
+- `heartbeat_hours` — send an "alive" ping at most this often. `0` disables.
+- Each theatre is checked on **both** its `cinema_url` and the `movie_page_url`.
+
+## State files
+
+After alerting for a theatre, a state file `.bms_alert_<theatre>_<date>` is
+written so it won't re-alert. Re-arm with:
+```bash
+rm .bms_alert_*          # or use: python setup_movie.py ... --clear-state
+```
+
+## Stop after you've booked
 
 ```bash
-caffeinate -s &
+crontab -r                                                            # stop checks
+launchctl unload ~/Library/LaunchAgents/com.srihari.caffeinate.plist  # let Mac sleep
 ```
 
-## Usage
+## Design decisions
 
-```
-python bms_watcher.py [OPTIONS]
-```
-
-### Required Arguments
-
-| Argument | Description |
-|----------|-------------|
-| `--url` | Full BMS showtime URL (OR use `--movie` + `--date`) |
-| `--movie` | Movie path from BMS URL (used with `--date`) |
-| `--date` | Date in YYYYMMDD format |
-| `--theatre` | Theatre name to match (e.g., `LUXE`, `PVR`, `Palazzo`) |
-
-### Optional Arguments
-
-| Argument | Default | Description |
-|----------|---------|-------------|
-| `--format` | `IMAX` | Format to filter (`IMAX`, `4DX`, `Dolby`, or `any`) |
-| `--ntfy-topic` | `bms-luxe-srihari` | ntfy.sh topic for notifications |
-| `--interval` | `10` | Check interval in minutes (for notification text only) |
-| `--dry-run` | — | Check without alerting or writing state |
-
-## Examples
-
-```bash
-# The Odyssey - LUXE IMAX - July 20
-python bms_watcher.py \
-    --url "https://in.bookmyshow.com/buytickets/the-odyssey-chennai/movie-chen-ET00480917-MT/20260720" \
-    --theatre LUXE --format IMAX
-
-# Future movie at PVR in 4DX
-python bms_watcher.py \
-    --url "https://in.bookmyshow.com/buytickets/some-movie-chennai/movie-chen-ET00XXXXXX-MT/20260801" \
-    --theatre PVR --format 4DX
-
-# Any format at Palazzo
-python bms_watcher.py \
-    --url "https://in.bookmyshow.com/buytickets/..." \
-    --theatre Palazzo --format any
-
-# Custom notification topic
-python bms_watcher.py \
-    --url "..." --theatre LUXE --format IMAX \
-    --ntfy-topic my-movie-alerts
-
-# Watch multiple movies simultaneously (separate cron entries)
-*/10 * * * * .venv/bin/python bms_watcher.py --url "URL1" --theatre LUXE --format IMAX --ntfy-topic alerts >> cron.log 2>&1
-*/10 * * * * .venv/bin/python bms_watcher.py --url "URL2" --theatre PVR --format 4DX --ntfy-topic alerts >> cron.log 2>&1
-```
-
-## How to Find the BMS URL
-
-1. Go to [bookmyshow.com](https://in.bookmyshow.com)
-2. Search for your movie
-3. Click on the movie → select your city
-4. Click "Book tickets" → select the date you want to watch
-5. The URL in your browser is what you need. It looks like:
-   ```
-   https://in.bookmyshow.com/buytickets/MOVIE-NAME-CITY/movie-CITY-ETXXXXXXXX-MT/YYYYMMDD
-   ```
-
-## Notifications
-
-### When booking opens (3 urgent notifications):
-1. 🚨 **BOOK NOW - IMAX Opened!** — with showtimes
-2. 🔥 **HURRY - IMAX slots live!** — with booking link
-3. 🎫 **LAST REMINDER - Book IMAX now!** — showtimes + link
-
-### When not yet available:
-- ⏳ **No luck - IMAX not open yet** — "No luck yet. Still checking every 10 min..."
-
-## State Files
-
-The watcher creates a state file (`.bms_alert_THEATRE_DATE`) after the first successful alert to prevent repeated notifications. Each theatre+date combo gets its own state file.
-
-To re-arm the watcher:
-```bash
-rm .bms_alert_luxe_20260720
-```
-
-## Troubleshooting
-
-| Problem | Cause | Fix |
-|---------|-------|-----|
-| Page timeout | BMS slow or date page doesn't exist yet | Normal — next cron run will retry |
-| False positive alert | BMS redirected to a different date | Fixed with URL + date verification |
-| No cron output | macOS blocking cron | Grant Full Disk Access to `/usr/sbin/cron` |
-| Notifications stop overnight | Mac slept | Use `caffeinate -s &` or keep lid open |
-| "Already alerted" in log | State file exists | Delete `.bms_alert_*` file to re-arm |
-| Permission error in cron log | Sandbox blocking .venv | Use full absolute paths in crontab |
-
-## Design Decisions
-
-1. **Playwright over requests** — BMS showtimes are JS-rendered; plain HTTP gets an empty shell
-2. **Format filtering** — the URL doesn't include format filters (that's client-side state), so we parse all formats and match the one you want
-3. **Date verification** — BMS may redirect to the nearest available date if your target date isn't open yet, causing false positives
-4. **Single-shot + state file** — cron needs one-check-and-exit; the state file prevents alert spam
-5. **ntfy.sh** — zero-auth push notifications; no Gmail App Passwords or API keys needed
+1. **Multi-source** — watch each theatre's cinema page AND the movie page, because they open at different times.
+2. **Fail-loud** — an unreadable page produces a WARNING, never a false "not open". This is the fix for the silent miss.
+3. **Chennai-wide safety net** — if the movie opens anywhere in Chennai but a theatre keyword didn't match, you still get told.
+4. **Heartbeat** — periodic "alive" ping so a dead watcher is noticeable.
+5. **Playwright + scroll** — BMS is JS-rendered and lazy-loads showtimes; we scroll before reading.
+6. **ntfy.sh** — zero-auth push notifications.
 
 ## Requirements
 
-- Python 3.9+
-- Playwright (`pip install playwright`)
-- Chromium (`playwright install chromium`)
+- Python 3.9+, Playwright + Chromium
 - ntfy app on phone (free)
-- macOS with cron access
+- macOS with cron; `caffeinate` to prevent sleep

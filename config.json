@@ -1,12 +1,72 @@
 {
     "ntfy_topic": "bms-luxe-srihari",
-    "interval": 10,
-    "watches": [
-        {
-            "name": "Spider-Man Jul 30",
-            "url": "https://in.bookmyshow.com/movies/chennai/spider-man-brand-new-day/buytickets/ET00502600/20260730",
-            "theatres": ["VR Chennai", "Sathyam"],
-            "format": "any"
-        }
-    ]
+    "interval": 15,
+    "city": "chennai",
+    "heartbeat_hours": 12,
+    "movie": {
+        "name": "Jailer 2",
+        "date": "20261015",
+        "movie_page_url": "https://in.bookmyshow.com/movies/chennai/jailer-2/buytickets/ET00521160/20261015",
+        "theatres": [
+            {
+                "name": "VR Chennai",
+                "cinema_url": "https://in.bookmyshow.com/cinemas/chennai/pvr-vr-chennai-anna-nagar/buytickets/PCAN/20261015",
+                "movie_page_keyword": "VR Chennai"
+            },
+            {
+                "name": "Aerohub",
+                "cinema_url": "https://in.bookmyshow.com/cinemas/chennai/pvr-aerohub-chennai/buytickets/PABC/20261015",
+                "movie_page_keyword": "Aerohub"
+            },
+            {
+                "name": "LUXE Phoenix",
+                "cinema_url": "https://in.bookmyshow.com/cinemas/chennai/inox-luxe-phoenix-market-city-velachery/buytickets/INPR/20261015",
+                "movie_page_keyword": "Phoenix Market City"
+            },
+            {
+                "name": "Palazzo",
+                "cinema_url": "https://in.bookmyshow.com/cinemas/chennai/pvr-palazzo-the-nexus-vijaya-mall/buytickets/PVPZ/20261015",
+                "movie_page_keyword": "Palazzo"
+            },
+            {
+                "name": "Sathyam",
+                "cinema_url": "https://in.bookmyshow.com/cinemas/chennai/pvr-sathyam-royapettah/buytickets/PVSR/20261015",
+                "movie_page_keyword": "Sathyam"
+            }
+        ]
+    },
+    "defaults": {
+        "preferred_theatres": [
+            {
+                "name": "VR Chennai",
+                "slug": "pvr-vr-chennai-anna-nagar",
+                "code": "PCAN",
+                "movie_page_keyword": "VR Chennai"
+            },
+            {
+                "name": "Aerohub",
+                "slug": "pvr-aerohub-chennai",
+                "code": "PABC",
+                "movie_page_keyword": "Aerohub"
+            },
+            {
+                "name": "LUXE Phoenix",
+                "slug": "inox-luxe-phoenix-market-city-velachery",
+                "code": "INPR",
+                "movie_page_keyword": "Phoenix Market City"
+            },
+            {
+                "name": "Palazzo",
+                "slug": "pvr-palazzo-the-nexus-vijaya-mall",
+                "code": "PVPZ",
+                "movie_page_keyword": "Palazzo"
+            },
+            {
+                "name": "Sathyam",
+                "slug": "pvr-sathyam-royapettah",
+                "code": "PVSR",
+                "movie_page_keyword": "Sathyam"
+            }
+        ]
+    }
 }
